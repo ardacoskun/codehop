@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.0](https://github.com/ardacoskun/codehop/compare/v0.1.2...v0.2.0) (2026-11-02)
+
+
+### Features
+
+* project paths in any command ([4b3965d](https://github.com/ardacoskun/codehop/commit/4b3965d1aaab3c31b389f71cf7e0fb28cb5d4327))
+
+
+### Bug Fixes
+
+* pass the PowerShell line in an environment variable and handle Windows paths ([391a4d8](https://github.com/ardacoskun/codehop/commit/391a4d83b037c72952491e0ec9c2f244f40c25c7))
+
 ## [0.1.2](https://github.com/ardacoskun/codehop/compare/v0.1.1...v0.1.2) (2026-11-02)
 
 
