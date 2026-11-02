@@ -42,11 +42,12 @@ homebrew_casks:
     homepage: https://github.com/ardacoskun/codehop
     description: Open any project by name from the terminal
     license: MIT
+    # The binary is not notarized yet, so macOS would block it on first run.
     hooks:
       post:
-        install: |
-          if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/codehop"]
+        install_steps: |
+          on_macos do
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/codehop"]
           end
 
 scoops:
