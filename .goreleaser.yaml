@@ -31,6 +31,8 @@ changelog:
 
 release:
   mode: keep-existing # release-please creates the release; goreleaser adds assets
+  # Lets `gh workflow run release.yml -f tag=...` rebuild an existing release.
+  replace_existing_artifacts: true
 
 homebrew_casks:
   - repository:

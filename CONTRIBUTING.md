@@ -48,21 +48,11 @@ the same.
   (`feat: ...`, `fix: ...`). Releases and the changelog are generated from them.
 - New user-facing behavior needs README and `--help` updates.
 
-## Going public (one-time checklist)
-
-The repository starts private. When making it public:
-
-1. Create the public repositories `ardacoskun/homebrew-tap` and `ardacoskun/scoop-bucket`.
-2. Create a fine-grained token with contents write access to those two repositories only.
-3. Create a `release` environment (Settings → Environments) with that token as
-   `TAP_GITHUB_TOKEN`, and add `environment: release` to the goreleaser job in
-   `.github/workflows/release.yml`.
-4. Release as usual. Homebrew, Scoop and build attestations switch on
-   automatically for public repositories.
-
 ## Releasing (maintainers)
 
 Merging to `main` keeps a release PR open (release-please). Merging that PR tags
 the version; GoReleaser then publishes binaries, the Homebrew cask and the Scoop
-manifest. The `TAP_GITHUB_TOKEN` secret must be a fine-grained token with
-contents write access to `homebrew-tap` and `scoop-bucket`.
+manifest. The `TAP_GITHUB_TOKEN` secret of the `release` environment must be a
+fine-grained token with contents write access to `homebrew-tap` and
+`scoop-bucket` only. To rebuild the assets of an existing release, run
+`gh workflow run release.yml -f tag=vX.Y.Z`.

@@ -32,9 +32,8 @@ jobs:
       always() && (needs.release-please.outputs.release_created == 'true' ||
       (github.event_name == 'workflow_dispatch' && startsWith(inputs.tag, 'v')))
     runs-on: ubuntu-latest
-    # When the repository goes public, add `environment: release` here (a
-    # protected environment holding TAP_GITHUB_TOKEN). Environments are not
-    # available to private repositories on free plans.
+    # Protected environment: TAP_GITHUB_TOKEN is only available here.
+    environment: release
     permissions:
       contents: write
       id-token: write
