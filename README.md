@@ -53,7 +53,7 @@ Run `codehop doctor` if nothing shows up. It prints where codehop is looking and
 | Windows (Scoop) | `scoop bucket add ardacoskun https://github.com/ardacoskun/scoop-bucket` then `scoop install codehop` |
 | macOS / Linux (script) | `curl -fsSL https://raw.githubusercontent.com/ardacoskun/codehop/main/scripts/install.sh \| sh` |
 | Windows (script) | `irm https://raw.githubusercontent.com/ardacoskun/codehop/main/scripts/install.ps1 \| iex` |
-| Go 1.23+ | `go install github.com/ardacoskun/codehop/cmd/codehop@latest` |
+| Go 1.26+ | `go install github.com/ardacoskun/codehop/cmd/codehop@latest` |
 | Manual | Download an archive from [Releases](https://github.com/ardacoskun/codehop/releases) and put `codehop` on your `PATH` |
 
 [fzf](https://github.com/junegunn/fzf) is optional but recommended for the picker. Without it, codehop shows a numbered list instead.
