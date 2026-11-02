@@ -19,7 +19,19 @@
 
     $version = $env:CODEHOP_VERSION
     if (-not $version) {
-        $version = (Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest").tag_name
+        # Read the tag from the /releases/latest redirect instead of the REST
+        # API, whose anonymous limit (60 requests an hour per IP) is easily hit
+        # behind shared addresses.
+        $request = [System.Net.HttpWebRequest]::Create("https://github.com/$repo/releases/latest")
+        $request.AllowAutoRedirect = $false
+        $request.Method = 'HEAD'
+        $response = $request.GetResponse()
+        try {
+            $location = $response.Headers['Location']
+        } finally {
+            $response.Close()
+        }
+        if ($location) { $version = $location.TrimEnd('/').Split('/')[-1] }
     }
     if ($version -notmatch '^v\d+\.\d+\.\d+([-+][0-9A-Za-z.-]+)?$') { throw "Invalid version '$version' (expected e.g. v0.1.0)" }
 
