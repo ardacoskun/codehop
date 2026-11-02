@@ -163,8 +163,9 @@ $global:__codehop_enter = {
 }
 if (Get-Module PSReadLine) { & {
     # Get-PSReadLineKeyHandler lists vi insert mode as "Enter" and vi command
-    # mode as "<Enter>".
-    $entries = @(Get-PSReadLineKeyHandler -Chord Enter)
+    # mode as "<Enter>". No -Chord: PSReadLine 2.0 (Windows PowerShell 5.1)
+    # does not have it.
+    $entries = @(Get-PSReadLineKeyHandler)
     $targets = if ((Get-PSReadLineOption).EditMode -eq 'Vi') {
         @(@{ Mode = 'Insert'; Key = 'Enter' }, @{ Mode = 'Command'; Key = '<Enter>' })
     } else {

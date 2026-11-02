@@ -71,6 +71,12 @@ Add one line to your shell's startup file:
 
 Git Bash on Windows uses the bash line.
 
+On Windows PowerShell 5.1 with codehop 0.2.0 or earlier, if loading the profile fails with an error about `-Chord`, update PSReadLine and reopen the terminal:
+
+```powershell
+Install-Module PSReadLine -Scope CurrentUser -Force -SkipPublisherCheck
+```
+
 `init` defines these commands:
 
 | Command | What it does |
