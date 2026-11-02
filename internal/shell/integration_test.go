@@ -462,3 +462,24 @@ Invoke-Expression (& { (codehop init powershell --cmd code | Out-String) })
 		})
 	}
 }
+
+func TestPowerShellEnterBinding(t *testing.T) {
+	editions := []string{"pwsh"}
+	if runtime.GOOS == "windows" {
+		editions = append(editions, "powershell")
+	}
+	for _, edition := range editions {
+		t.Run(edition, func(t *testing.T) {
+			ps := requireShell(t, edition)
+			e := newEnv(t)
+			out := e.run(t, ps, "-NoProfile", "-NonInteractive", "-Command", `
+$ErrorActionPreference = 'Stop'
+Import-Module PSReadLine
+Invoke-Expression (& { (codehop init powershell --cmd code | Out-String) })
+"ENTER:" + (Get-PSReadLineKeyHandler | Where-Object Key -EQ 'Enter').Function`)
+			if !strings.Contains(out, "ENTER:CodehopAcceptLine") {
+				t.Errorf("PowerShell did not bind Enter:\n%s", out)
+			}
+		})
+	}
+}
