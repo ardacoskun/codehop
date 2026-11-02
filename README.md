@@ -141,6 +141,13 @@ it offers fuzzy matches and replaces the word: `code shuf<Tab>` becomes
 [fzf-tab](https://github.com/Aloxaf/fzf-tab) and shows each project's category
 next to its name.
 
+On Windows, PowerShell's Tab cycles through completions in place instead of
+listing them. Press Ctrl+Space to see the list, or add
+`Set-PSReadLineKeyHandler -Key Tab -Function MenuComplete` to `$PROFILE` to make
+Tab show it. PowerShell's greyed-out suggestions come from your history, not from
+codehop, and need PSReadLine 2.1+ (built into PowerShell 7; Windows PowerShell 5.1
+ships 2.0).
+
 ### Project paths in any command
 
 Write `@` in front of a project name and it becomes that project's path in
