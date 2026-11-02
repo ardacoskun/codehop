@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/ardacoskun/codehop/compare/v0.1.1...v0.1.2) (2026-11-02)
+
+
+### Bug Fixes
+
+* use the plain token template goreleaser requires ([fe8f182](https://github.com/ardacoskun/codehop/commit/fe8f182394df90499a1583b4b9c69f83804f3e7d))
+
 ## [0.1.1](https://github.com/ardacoskun/codehop/compare/v0.1.0...v0.1.1) (2026-11-02)
 
 
