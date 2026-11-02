@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/ardacoskun/codehop/compare/v0.2.0...v0.2.1) (2026-11-02)
+
+
+### Bug Fixes
+
+* bind Enter under PSReadLine 2.0 (Windows PowerShell 5.1) ([#10](https://github.com/ardacoskun/codehop/issues/10)) ([3c6e118](https://github.com/ardacoskun/codehop/commit/3c6e11802ad4f9613b201295523d1cf33c8e184e))
+
 ## [0.2.0](https://github.com/ardacoskun/codehop/compare/v0.1.2...v0.2.0) (2026-11-02)
 
 
