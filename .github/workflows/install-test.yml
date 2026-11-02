@@ -55,3 +55,26 @@ jobs:
           $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
           if (($userPath -split ';') -notcontains (Split-Path $exe)) { throw 'install dir was not added to the user PATH' }
           Write-Host 'install.ps1 OK'
+
+  homebrew:
+    runs-on: macos-latest
+    steps:
+      - name: brew install ardacoskun/tap/codehop
+        run: |
+          brew install ardacoskun/tap/codehop
+          codehop --version
+
+  scoop:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: scoop install codehop
+        run: |
+          Invoke-Expression "& {$(Invoke-RestMethod https://get.scoop.sh)} -RunAsAdmin"
+          $env:Path = "$env:USERPROFILE\scoop\shims;$env:Path"
+          scoop bucket add ardacoskun https://github.com/ardacoskun/scoop-bucket
+          scoop install ardacoskun/codehop
+          codehop --version
+          if ($LASTEXITCODE -ne 0) { throw 'codehop did not run' }
