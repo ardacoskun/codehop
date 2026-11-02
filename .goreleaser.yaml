@@ -38,7 +38,7 @@ homebrew_casks:
   - repository:
       owner: ardacoskun
       name: homebrew-tap
-      token: '{{ index .Env "TAP_GITHUB_TOKEN" }}'
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
     # Published only from the public repository (see release.yml).
     skip_upload: '{{ if eq (index .Env "PUBLIC_RELEASE") "true" }}false{{ else }}true{{ end }}'
     homepage: https://github.com/ardacoskun/codehop
@@ -56,7 +56,7 @@ scoops:
   - repository:
       owner: ardacoskun
       name: scoop-bucket
-      token: '{{ index .Env "TAP_GITHUB_TOKEN" }}'
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
     # Published only from the public repository (see release.yml).
     skip_upload: '{{ if eq (index .Env "PUBLIC_RELEASE") "true" }}false{{ else }}true{{ end }}'
     homepage: https://github.com/ardacoskun/codehop
