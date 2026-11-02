@@ -1,0 +1,19 @@
+version: "2"
+linters:
+  enable:
+    - errorlint
+    - gocritic
+    - misspell
+    - revive
+    - unconvert
+    - unparam
+  settings:
+    misspell:
+      locale: US
+  exclusions:
+    presets: [std-error-handling]
+formatters:
+  enable: [gofmt, goimports]
+  settings:
+    goimports:
+      local-prefixes: [github.com/ardacoskun/codehop]

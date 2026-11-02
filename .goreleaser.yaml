@@ -1,0 +1,61 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+
+project_name: codehop
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - main: ./cmd/codehop
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags: ["-s -w -X main.version={{ .Version }}"]
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files: [LICENSE, README.md, CHANGELOG.md]
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  disable: true # release-please writes CHANGELOG.md and the release notes
+
+release:
+  mode: keep-existing # release-please creates the release; goreleaser adds assets
+
+homebrew_casks:
+  - repository:
+      owner: ardacoskun
+      name: homebrew-tap
+      token: '{{ envOrDefault "TAP_GITHUB_TOKEN" "" }}'
+    # Published only from the public repository (see release.yml).
+    skip_upload: '{{ if eq (envOrDefault "PUBLIC_RELEASE" "false") "true" }}false{{ else }}true{{ end }}'
+    homepage: https://github.com/ardacoskun/codehop
+    description: Open any project by name from the terminal
+    license: MIT
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/codehop"]
+          end
+
+scoops:
+  - repository:
+      owner: ardacoskun
+      name: scoop-bucket
+      token: '{{ envOrDefault "TAP_GITHUB_TOKEN" "" }}'
+    # Published only from the public repository (see release.yml).
+    skip_upload: '{{ if eq (envOrDefault "PUBLIC_RELEASE" "false") "true" }}false{{ else }}true{{ end }}'
+    homepage: https://github.com/ardacoskun/codehop
+    description: Open any project by name from the terminal
+    license: MIT
