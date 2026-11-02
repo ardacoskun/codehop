@@ -73,7 +73,17 @@ All of them complete project names with Tab.
 			if noCmd {
 				cmdName = ""
 			}
-			script, err := shell.Render(args[0], shell.Options{Cmd: cmdName, CdCmd: cdCmd, Actions: cfg.ActionList()})
+			script, err := shell.Render(args[0], shell.Options{
+				Cmd:     cmdName,
+				CdCmd:   cdCmd,
+				Actions: cfg.ActionList(),
+				Expand: shell.Expand{
+					Enabled:  *cfg.Expand.Enabled,
+					Prefix:   *cfg.Expand.Prefix,
+					Commands: cfg.Expand.Commands,
+					Skip:     cfg.Expand.Skip,
+				},
+			})
 			if err != nil {
 				return err
 			}

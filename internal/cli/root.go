@@ -190,6 +190,8 @@ Set up your shell (see "codehop init --help"), then:
 		newOpenCmd(a),
 		newQueryCmd(a),
 		newWrapCmd(a),
+		newExpandLineCmd(a),
+		newExpandWordCmd(a),
 		newListCmd(a),
 		newStatusCmd(a),
 		newPreviewCmd(a),

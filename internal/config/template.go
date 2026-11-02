@@ -39,6 +39,21 @@ const Template = `# codehop configuration — https://github.com/ardacoskun/code
 # Extra fzf options for the picker.
 # fzf_opts = "--height=50%"
 
+# Project paths in any command. "@blog/src" becomes the path of the project
+# "blog" in every command, and the commands listed below also accept a bare
+# project name ("cd blog", "ls blog") when no file of that name exists here.
+# Expansion happens when Enter is pressed, so you see the real command.
+# [expand]
+# enabled = true
+# prefix = "@"            # one of @ , + :   ("" turns @-paths off)
+# commands = ["cd", "pushd", "ls", "tree", "open", "xdg-open", "sl", "Set-Location",
+#             "Push-Location", "dir", "gci", "Get-ChildItem", "ii", "Invoke-Item", "explorer"]
+# Commands never touched, wherever they appear on the line ("@types/node",
+# "curl -d @file", "xargs npm i @scope/pkg").
+# skip = ["npm", "npx", "pnpm", "pnpx", "yarn", "yarnpkg", "bun", "bunx", "deno", "corepack",
+#         "ni", "nr", "nlx", "nun", "nci", "expo", "eas", "ng", "nx", "nest", "lerna", "rush",
+#         "jsr", "volta", "ncu", "tsx", "node", "curl", "http", "https", "xh"]
+
 # Actions become shell commands that cd into a project and run something.
 # They are inserted verbatim into your shell, e.g. "cc color-shuffle".
 # [actions]

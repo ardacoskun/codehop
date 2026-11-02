@@ -13,14 +13,18 @@ if (-not $global:__codehop_exe) {
 function global:__codehop_run {
     # Hosts without a console (ISE, some editor terminals) reject the
     # assignment; codehop still works there, only non-ASCII names may suffer.
+    # $OutputEncoding is what PowerShell uses for text piped into codehop.
     $saved = $null
+    $savedInput = $global:OutputEncoding
     try {
         $saved = [Console]::OutputEncoding
         [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
     } catch { $saved = $null }
     try {
-        & $global:__codehop_exe @args
+        $global:OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+        $input | & $global:__codehop_exe @args
     } finally {
+        $global:OutputEncoding = $savedInput
         if ($null -ne $saved) { try { [Console]::OutputEncoding = $saved } catch { } }
     }
 }
@@ -74,5 +78,209 @@ function global:{{.Name}} {
     {{.Command}} @rest
 }
 Register-ArgumentCompleter -Native -CommandName {{.Name}} -ScriptBlock $global:__codehop_completer
+{{- end}}
+{{- if .Expand.Enabled}}
+
+# --- Project paths in any command --------------------------------------------
+# {{if .Expand.Prefix}}"{{.Expand.Prefix}}blog\src" works in every command, and {{end}}"cd blog" / "ls blog"
+# accept a bare project name when nothing of that name exists here. They are
+# expanded when Enter is pressed (PSReadLine), so the line you see is what
+# runs and what history keeps; Tab completes them. codehop decides; anything
+# unclear is left as typed.
+$global:__codehop_expand_commands = @({{range $i, $c := .Expand.Commands}}{{if $i}}, {{end}}'{{$c}}'{{end}})
+$global:__codehop_expand_skip = @({{range $i, $c := .Expand.Skip}}{{if $i}}, {{end}}'{{$c}}'{{end}})
+
+# True when a tool from the skip list appears in the line; its own
+# completion is then left alone.
+function global:__codehop_mentions_skipped([string] $line) {
+    foreach ($w in ($line -split '[\s;|]+')) {
+        $name = [System.IO.Path]::GetFileNameWithoutExtension($w)
+        if ($name -and $global:__codehop_expand_skip -contains $name) { return $true }
+    }
+    return $false
+}
+$global:__codehop_expand_prefix = '{{.Expand.Prefix}}'
+
+# "@name" splats the variable $name in PowerShell, so names of existing
+# variables are left alone.
+function global:__codehop_splat_names([string] $line) {
+    if (-not $global:__codehop_expand_prefix) { return @() }
+    $rx = '(?<=^|[\s;|])' + [regex]::Escape($global:__codehop_expand_prefix) + '([\w.-]+)'
+    @([regex]::Matches($line, $rx) | ForEach-Object { $_.Groups[1].Value } |
+        Where-Object { Get-Variable -Name $_ -ErrorAction SilentlyContinue })
+}
+
+function global:__codehop_cwd {
+    (Get-Location -PSProvider FileSystem).ProviderPath
+}
+
+# Returns the reply of `codehop expand-line` as @(status, text), or $null when
+# the line has nothing codehop could expand.
+function global:__codehop_expand_line([string] $line) {
+    $first = ($line.TrimStart() -split '[\s;|]', 2)[0]
+    $hasPrefix = $global:__codehop_expand_prefix -and $line.Contains($global:__codehop_expand_prefix)
+    if (-not $hasPrefix -and $global:__codehop_expand_commands -notcontains $first) { return $null }
+    $cmdArgs = @('expand-line', '--shell', 'powershell', '--cwd', (__codehop_cwd))
+    foreach ($name in (__codehop_splat_names $line)) { $cmdArgs += "--keep=$name" }
+    $reply = $line | __codehop_run @cmdArgs
+    if ($LASTEXITCODE -ne 0 -or -not $reply) { return $null }
+    return , ((@($reply) -join "`n") -split "`n", 2)
+}
+
+# The Enter key is taken over only when it still does what PSReadLine ships
+# with; a custom Enter handler is left alone (Tab completion still works).
+$global:__codehop_enter = {
+        $line = $null
+        $cursor = $null
+        [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref] $line, [ref] $cursor)
+        $reply = $null
+        $savedExit = $global:LASTEXITCODE
+        try { $reply = __codehop_expand_line $line } catch { $reply = $null }
+        $global:LASTEXITCODE = $savedExit
+        if ($reply -and $reply[0] -eq 'BLOCK') {
+            # Keep the line for editing and say why it did not run.
+            [Microsoft.PowerShell.PSConsoleReadLine]::Ding()
+            Write-Host ''
+            Write-Host $reply[1] -ForegroundColor Yellow
+            [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt()
+            return
+        }
+        if ($reply -and $reply[0] -eq 'OK' -and $reply.Count -eq 2 -and $reply[1] -ne $line) {
+            [Microsoft.PowerShell.PSConsoleReadLine]::Replace(0, $line.Length, $reply[1])
+        }
+        if ($global:__codehop_validate) {
+            [Microsoft.PowerShell.PSConsoleReadLine]::ValidateAndAcceptLine()
+        } else {
+            [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
+        }
+}
+if (Get-Module PSReadLine) { & {
+    # Get-PSReadLineKeyHandler lists vi insert mode as "Enter" and vi command
+    # mode as "<Enter>".
+    $entries = @(Get-PSReadLineKeyHandler -Chord Enter)
+    $targets = if ((Get-PSReadLineOption).EditMode -eq 'Vi') {
+        @(@{ Mode = 'Insert'; Key = 'Enter' }, @{ Mode = 'Command'; Key = '<Enter>' })
+    } else {
+        @(@{ Mode = ''; Key = 'Enter' })
+    }
+    foreach ($target in $targets) {
+        $fn = ($entries | Where-Object Key -EQ $target.Key | Select-Object -First 1).Function
+        if ($fn -notin @('AcceptLine', 'ValidateAndAcceptLine', 'ViAcceptLine', 'CodehopAcceptLine')) { continue }
+        if ($fn -eq 'ValidateAndAcceptLine') { $global:__codehop_validate = $true }
+        $handler = @{
+            Chord            = 'Enter'
+            BriefDescription = 'CodehopAcceptLine'
+            Description      = 'Expand codehop project paths, then accept the line'
+            ScriptBlock      = $global:__codehop_enter
+        }
+        if ($target.Mode) { $handler.ViMode = $target.Mode }
+        Set-PSReadLineKeyHandler @handler
+    }
+} }
+
+# Quotes a completion when PowerShell would not read it as one literal word.
+function global:__codehop_quote([string] $text) {
+    if ($text -match '^[\w.@%^+:/\\-]+\z') { return $text }
+    $quotes = "['" + [char]0x2018 + [char]0x2019 + [char]0x201A + [char]0x201B + "]"
+    "'" + ($text -replace $quotes, '$0$0') + "'"
+}
+
+# Completions for the word before the cursor, or $null to let PowerShell
+# complete as usual: "@name" and "@name/path" anywhere, bare names after
+# [expand] commands in the first command when nothing local matches.
+function global:__codehop_complete_expand([string] $text, [string] $full) {
+    if (__codehop_mentions_skipped $full) { return $null }
+    $word = [regex]::Match($text, '[^\s;|]*$').Value
+    $prefix = $global:__codehop_expand_prefix
+    $items = [System.Collections.Generic.List[System.Management.Automation.CompletionResult]]::new()
+    if ($prefix -and $word.StartsWith($prefix) -and $text.Length -gt $word.Length) {
+        $body = $word.Substring($prefix.Length)
+        # "@params" splats $params: when a variable of exactly that name
+        # exists, leave the word to PowerShell (Enter does the same).
+        if ($prefix -eq '@' -and $body -and $body -notmatch '[/\\]' -and
+            (Get-Variable -Name ([WildcardPattern]::Escape($body)) -ErrorAction SilentlyContinue)) { return $null }
+        $sep = $body.IndexOfAny([char[]]'/\')
+        if ($sep -ge 0) {
+            $name = $body.Substring(0, $sep)
+            $rest = $body.Substring($sep + 1)
+            $dir = __codehop_run query --exact -- $name 2>$null
+            if ($LASTEXITCODE -ne 0 -or -not $dir) { return $null }
+            $cut = $rest.LastIndexOfAny([char[]]'/\')
+            $sub = $rest.Substring(0, $cut + 1)
+            $leaf = $rest.Substring($cut + 1)
+            Get-ChildItem -LiteralPath (Join-Path $dir $sub) -Force -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -like ([WildcardPattern]::Escape($leaf) + '*') } |
+                ForEach-Object {
+                    $tail = if ($_.PSIsContainer) { '/' } else { '' }
+                    $full = $prefix + $name + '/' + ($sub -replace '\\', '/') + $_.Name + $tail
+                    $items.Add([System.Management.Automation.CompletionResult]::new(
+                        (__codehop_quote $full), $_.Name, 'ProviderItem', $_.FullName))
+                }
+        } else {
+            __codehop_run list --describe "--query=$body" 2>$null | ForEach-Object {
+                $name, $desc = $_ -split "`t", 2
+                $items.Add([System.Management.Automation.CompletionResult]::new(
+                    (__codehop_quote "$prefix$name/"), $name, 'ParameterValue', "$desc"))
+            }
+        }
+    } else {
+        $first = ($text.TrimStart() -split '\s+', 2)[0]
+        if (-not $word -or $full -match '[;|&]' -or $word -match '^[-.~/\\+]' -or $word -match '[/\\]' -or
+            $global:__codehop_expand_commands -notcontains $first -or $text.TrimStart().Length -eq $word.Length) { return $null }
+        if (Get-ChildItem -Path ([WildcardPattern]::Escape($word) + '*') -Force -ErrorAction SilentlyContinue |
+            Select-Object -First 1) { return $null }
+        __codehop_run list --describe "--query=$word" 2>$null | ForEach-Object {
+            $name, $desc = $_ -split "`t", 2
+            $items.Add([System.Management.Automation.CompletionResult]::new(
+                (__codehop_quote "$name/"), $name, 'ParameterValue', "$desc"))
+        }
+    }
+    if ($items.Count -eq 0) { return $null }
+    [System.Management.Automation.CommandCompletion]::new($items, -1, $text.Length - $word.Length, $word.Length)
+}
+
+# PowerShell asks TabExpansion2 for every completion; codehop answers first
+# for its own words and hands everything else to the previous TabExpansion2.
+if (-not $global:__codehop_tabexpansion) {
+    $global:__codehop_tabexpansion = (Get-Item Function:\TabExpansion2).ScriptBlock
+}
+function global:TabExpansion2 {
+    [CmdletBinding(DefaultParameterSetName = 'ScriptInputSet')]
+    [OutputType([System.Management.Automation.CommandCompletion])]
+    param(
+        [Parameter(ParameterSetName = 'ScriptInputSet', Mandatory = $true, Position = 0)]
+        [AllowEmptyString()]
+        [string] $inputScript,
+
+        [Parameter(ParameterSetName = 'ScriptInputSet', Position = 1)]
+        [int] $cursorColumn = $inputScript.Length,
+
+        [Parameter(ParameterSetName = 'AstInputSet', Mandatory = $true, Position = 0)]
+        [System.Management.Automation.Language.Ast] $ast,
+
+        [Parameter(ParameterSetName = 'AstInputSet', Mandatory = $true, Position = 1)]
+        [System.Management.Automation.Language.Token[]] $tokens,
+
+        [Parameter(ParameterSetName = 'AstInputSet', Mandatory = $true, Position = 2)]
+        [System.Management.Automation.Language.IScriptPosition] $positionOfCursor,
+
+        [Parameter(ParameterSetName = 'ScriptInputSet', Position = 2)]
+        [Parameter(ParameterSetName = 'AstInputSet', Position = 3)]
+        [Hashtable] $options = $null
+    )
+    try {
+        $full = if ($PSCmdlet.ParameterSetName -eq 'ScriptInputSet') { $inputScript } else { $ast.Extent.Text }
+        $text = if ($PSCmdlet.ParameterSetName -eq 'ScriptInputSet') {
+            $inputScript.Substring(0, [Math]::Min($cursorColumn, $inputScript.Length))
+        } else {
+            $ast.Extent.Text.Substring(0, $positionOfCursor.Offset - $ast.Extent.StartOffset)
+        }
+        $savedExit = $global:LASTEXITCODE
+        $own = __codehop_complete_expand $text $full
+        $global:LASTEXITCODE = $savedExit
+        if ($own) { return $own }
+    } catch { }
+    & $global:__codehop_tabexpansion @PSBoundParameters
+}
 {{- end}}
 }

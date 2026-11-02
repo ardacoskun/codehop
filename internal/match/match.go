@@ -169,6 +169,10 @@ func splitWords(s string) []string {
 	return words
 }
 
+// Normalize lowercases and unifies separators the way project matching does,
+// so "Color_Shuffle", "color shuffle" and "color-shuffle" compare equal.
+func Normalize(s string) string { return normalize(s) }
+
 // normalize lowercases and unifies separators so "Color_Shuffle", "color shuffle"
 // and "color-shuffle" compare equal. Path separators become "/".
 // Names are NFC-normalized first: macOS often stores "é" decomposed (NFD)

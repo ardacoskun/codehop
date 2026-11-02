@@ -6,6 +6,7 @@ import (
 	"embed"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"text/template"
@@ -23,6 +24,10 @@ var aliases = map[string]string{"pwsh": "powershell"}
 
 var commandNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*$`)
 
+// expandCommandPattern matches [expand] command names, which are written into
+// shell code (e.g. "Set-Location", "xdg-open").
+var expandCommandPattern = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.+-]*$`)
+
 // Options are the user's choices for the generated integration.
 type Options struct {
 	// Cmd is the name of the open/wrapper command (e.g. "code"); empty skips it.
@@ -31,6 +36,19 @@ type Options struct {
 	CdCmd string
 	// Actions become commands that cd into a project and run a command.
 	Actions []config.Action
+	// Expand configures project paths in any command ("@blog", "cd blog").
+	Expand Expand
+}
+
+// Expand is the part of the [expand] config the shell side needs.
+type Expand struct {
+	Enabled bool
+	// Prefix is "" or one of config.AllowedExpandPrefixes.
+	Prefix string
+	// Commands accept a bare project name.
+	Commands []string
+	// Skip lists commands whose own completion is never replaced.
+	Skip []string
 }
 
 type templateData struct {
@@ -65,7 +83,8 @@ func Render(shellName string, opts Options) (string, error) {
 		return "", err
 	}
 	tmpl, err := template.New(name).Funcs(template.FuncMap{
-		"join": strings.Join,
+		"join":        strings.Join,
+		"regexEscape": regexp.QuoteMeta,
 	}).ParseFS(templates, "templates/"+name+".tmpl")
 	if err != nil {
 		return "", err
@@ -93,6 +112,14 @@ func validate(opts Options) error {
 	names := []string{opts.Cmd, opts.CdCmd}
 	for _, a := range opts.Actions {
 		names = append(names, a.Name)
+	}
+	if p := opts.Expand.Prefix; p != "" && !slices.Contains(config.AllowedExpandPrefixes, p) {
+		return fmt.Errorf("invalid expand prefix %q", p)
+	}
+	for _, c := range append(append([]string(nil), opts.Expand.Commands...), opts.Expand.Skip...) {
+		if !expandCommandPattern.MatchString(c) {
+			return fmt.Errorf("invalid expand command %q", c)
+		}
 	}
 	for _, n := range names {
 		if n == "" {

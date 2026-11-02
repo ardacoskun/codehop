@@ -51,6 +51,48 @@ var DefaultIgnore = []string{
 
 var actionNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*$`)
 
+// commandNamePattern restricts [expand] command names, which are written
+// into shell code by `codehop init`.
+var commandNamePattern = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.+-]*$`)
+
+// DefaultExpandPrefix marks a project path in any command: "@blog/src".
+const DefaultExpandPrefix = "@"
+
+// AllowedExpandPrefixes are the characters that may mark a project path. They
+// are not special to any supported shell at the start of a word (% is a job
+// spec in bash and zsh, ^ a glob operator in zsh).
+var AllowedExpandPrefixes = []string{"@", ",", "+", ":"}
+
+// DefaultExpandCommands take a bare project name in place of a path
+// ("cd blog", "ls blog") when no file of that name exists. Unix and Windows
+// (PowerShell) names are listed together; names a shell lacks never match.
+var DefaultExpandCommands = []string{
+	"cd", "pushd", "ls", "tree", "open", "xdg-open",
+	"sl", "Set-Location", "Push-Location", "dir", "gci", "Get-ChildItem", "ii", "Invoke-Item", "explorer",
+}
+
+// DefaultExpandSkip are commands whose arguments are never expanded because
+// "@" means something else to them: npm scopes ("@types/node") and curl or
+// HTTPie file uploads ("-d @data.json").
+var DefaultExpandSkip = []string{
+	"npm", "npx", "pnpm", "pnpx", "yarn", "yarnpkg", "bun", "bunx", "deno", "corepack",
+	"ni", "nr", "nlx", "nun", "nci", "expo", "eas", "ng", "nx", "nest", "lerna", "rush",
+	"jsr", "volta", "ncu", "tsx", "node",
+	"curl", "http", "https", "xh",
+}
+
+// Expand configures project paths in any command.
+type Expand struct {
+	// Enabled turns the whole feature on or off (default on).
+	Enabled *bool `toml:"enabled"`
+	// Prefix marks a project path anywhere ("@blog/src"); "" disables it.
+	Prefix *string `toml:"prefix"`
+	// Commands accept a bare project name as a path argument.
+	Commands []string `toml:"commands"`
+	// Skip lists commands whose arguments are never expanded.
+	Skip []string `toml:"skip"`
+}
+
 // Config is the effective configuration after defaults, file and environment.
 type Config struct {
 	Roots           []string          `toml:"roots"`
@@ -62,6 +104,7 @@ type Config struct {
 	CloneRoot       string            `toml:"clone_root"`
 	FzfOpts         string            `toml:"fzf_opts"`
 	Actions         map[string]string `toml:"actions"`
+	Expand          Expand            `toml:"expand"`
 
 	// Path is the config file that was read, or would be read if it existed.
 	Path string `toml:"-"`
@@ -153,12 +196,45 @@ func (c *Config) normalize() error {
 		c.CloneRoot = paths.Expand(c.CloneRoot)
 	}
 
+	if err := c.Expand.normalize(); err != nil {
+		return err
+	}
+
 	for name := range c.Actions {
 		if !actionNamePattern.MatchString(name) {
 			return fmt.Errorf("action name %q must start with a letter or _ and contain only letters, digits, _ and -", name)
 		}
 		if strings.TrimSpace(c.Actions[name]) == "" {
 			return fmt.Errorf("action %q has an empty command", name)
+		}
+	}
+	return nil
+}
+
+func (e *Expand) normalize() error {
+	if e.Enabled == nil {
+		enabled := true
+		e.Enabled = &enabled
+	}
+	if e.Prefix == nil {
+		prefix := DefaultExpandPrefix
+		e.Prefix = &prefix
+	}
+	if *e.Prefix != "" && !slices.Contains(AllowedExpandPrefixes, *e.Prefix) {
+		return fmt.Errorf("expand.prefix must be one of %s or empty, got %q",
+			strings.Join(AllowedExpandPrefixes, " "), *e.Prefix)
+	}
+	if e.Commands == nil {
+		e.Commands = DefaultExpandCommands
+	}
+	if e.Skip == nil {
+		e.Skip = DefaultExpandSkip
+	}
+	for _, list := range [][]string{e.Commands, e.Skip} {
+		for _, name := range list {
+			if !commandNamePattern.MatchString(name) {
+				return fmt.Errorf("expand: invalid command name %q", name)
+			}
 		}
 	}
 	return nil

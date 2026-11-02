@@ -4,7 +4,8 @@
 
 # Completes project names. Prefix matches complete normally; when nothing
 # starts with the typed text, codehop returns fuzzy matches and -U lets them
-# replace the word ("shuf<Tab>" → "color-shuffle").
+# replace the word ("shuf<Tab>" → "color-shuffle"). Extra arguments are
+# passed on to compadd (e.g. -qS/ to continue into the project).
 function __codehop_complete_projects {
   local line p
   local -a names projects
@@ -16,7 +17,7 @@ function __codehop_complete_projects {
   (( ${#names} )) || return 1
   for p in "${names[@]}"; do
     if [[ ${(L)p} == "${(L)PREFIX}"* ]]; then
-      _describe -t projects 'project' projects
+      _describe -t projects 'project' projects "$@"
       return
     fi
   done
@@ -24,7 +25,7 @@ function __codehop_complete_projects {
   # Several of them share no useful prefix, so start menu completion
   # (Tab cycles) rather than erasing what was typed.
   local expl
-  _wanted projects expl 'project' compadd -U -a names
+  _wanted projects expl 'project' compadd -U "$@" -a names
   (( ${#names} > 1 )) && compstate[insert]=menu
   return 0
 }
@@ -76,32 +77,147 @@ function {{.Name}} {
 }
 {{- end}}
 
-{{- if .AllNames}}
+typeset -ga __codehop_names=({{join .AllNames " "}})
+{{- if .Expand.Enabled}}
+typeset -ga __codehop_expand_commands=({{join .Expand.Commands " "}})
+typeset -ga __codehop_expand_skip=({{join .Expand.Skip " "}})
+
+# --- Project paths in any command --------------------------------------------
+# {{if .Expand.Prefix}}"{{.Expand.Prefix}}blog/src" works in every command, and {{end}}"cd blog" / "ls blog"
+# accept a bare project name when nothing of that name exists here. They are
+# expanded when Enter is pressed, so the line you see is what runs and what
+# history keeps. codehop decides; anything unclear is left as typed.
+
+# Rewrites $BUFFER. Returns 1 (and shows why) when the line must not run,
+# e.g. a name that matches several projects.
+function __codehop_expand_buffer {
+  emulate -L zsh
+  # Only a fresh command at the prompt: not a continuation line (heredoc
+  # body, open quote: CONTEXT=cont, PREBUFFER set) and not vared/read -e.
+  [[ -n $BUFFER && $CONTEXT == start && -z $PREBUFFER ]] || return 0
+  local -a words=(${(z)BUFFER})
+  [[ {{if .Expand.Prefix}}$BUFFER == *"{{.Expand.Prefix}}"* || {{end}}( ${#words} -gt 1 && -n ${words:*__codehop_expand_commands} ) ]] || return 0
+  local reply
+  reply=$(print -rn -- "$BUFFER" | command codehop expand-line --shell zsh --cwd "$PWD" --cdpath "${(j.:.)cdpath}" 2>/dev/null) || return 0
+  case ${reply%%$'\n'*} in
+    (OK) [[ $reply == *$'\n'* ]] && BUFFER=${reply#*$'\n'} ;;
+    (BLOCK) zle -M "${reply#*$'\n'}"; return 1 ;;
+  esac
+  return 0
+}
+
+function __codehop_accept_line {
+  __codehop_expand_buffer || return 0
+  if (( ${+widgets[__codehop_orig_accept_line]} )); then
+    zle __codehop_orig_accept_line -- "$@"
+  else
+    zle .accept-line -- "$@"
+  fi
+}
+# Installed once: loading the integration again (source ~/.zshrc) must not
+# wrap accept-line around a wrapper of itself.
+if (( ! ${+__codehop_accept_installed} )); then
+  typeset -g __codehop_accept_installed=1
+  # Keep a widget another plugin already put on accept-line.
+  if [[ ${widgets[accept-line]} == user:* ]]; then
+    zle -A accept-line __codehop_orig_accept_line
+  fi
+  zle -N accept-line __codehop_accept_line
+fi
+
+# True when something in the current directory starts with $1.
+function __codehop_local_match {
+  local -a found=( ${(b)1}*(N) )
+  (( ${#found} ))
+}
+
+# True when the command line $1 is a single command. Bare project names only
+# expand then (in a chain like "cd docs && rm -rf *" the shell's own failure
+# must stand), so they are only offered then too.
+function __codehop_single_command {
+  local -a separators=( ';' '&&' '||' '|' '&' '|&' $'\n' )
+  local -a toks=( ${(z)1} )
+  [[ -z ${toks:*separators} ]]
+}
+
+# Completion that runs before any command's own (the -first- context):
+# "{{.Expand.Prefix}}name" anywhere completes projects, "{{.Expand.Prefix}}name/..." files inside the
+# project; a bare word after an [expand] command gets project names only when
+# nothing local matches it, so normal completion is never crowded.
+# The -first- completer that was set before codehop (kept across reloads).
+if [[ ${_comps[-first-]-} != __codehop_complete_any ]]; then
+  typeset -g __codehop_prev_first=${_comps[-first-]-}
+fi
+function __codehop_complete_any {
+  # Tools in the skip list keep their own completion ("curl -d @file"),
+  # also when given by path ("/usr/local/bin/npm").
+  local -a __codehop_cmds=( ${(L)words:t} )
+  if [[ -z ${__codehop_cmds:*__codehop_expand_skip} ]]; then
+{{- if .Expand.Prefix}}
+    if [[ $PREFIX == "{{.Expand.Prefix}}"?* || ( $PREFIX == "{{.Expand.Prefix}}" && -z $SUFFIX ) ]]; then
+      local added=1 saved_iprefix=$IPREFIX saved_prefix=$PREFIX
+      if [[ $PREFIX == */* ]]; then
+        local name=${${PREFIX#?}%%/*} dir
+        if dir=$(command codehop query --exact -- "$name" 2>/dev/null); then
+          compset -P 1 '*/'
+          _files -W "$dir" && added=0
+        fi
+      else
+        compset -P 1 '?'
+        __codehop_complete_projects -qS/ && added=0
+      fi
+      # Only take over the word when codehop had something to offer.
+      if (( added == 0 )); then
+        _compskip=all
+        return 0
+      fi
+      IPREFIX=$saved_iprefix PREFIX=$saved_prefix
+    fi
+{{- end}}
+  fi
+  if (( CURRENT >= 2 && ${__codehop_expand_commands[(Ie)${words[1]}]} )) &&
+      [[ -n $PREFIX && $PREFIX != [-.~/+]* && $PREFIX != */* ]] &&
+      __codehop_single_command "$BUFFER" && ! __codehop_local_match "$PREFIX"; then
+    __codehop_complete_projects -qS/
+  fi
+  [[ -n ${__codehop_prev_first-} && $__codehop_prev_first != __codehop_complete_any ]] && "$__codehop_prev_first"
+  return 0
+}
+{{- end}}
 
 # Inline suggestion for zsh-autosuggestions: typing "code col" shows
 # "code color-shuffle" greyed out (→ accepts it). Only prefix matches are
-# suggested, most frecent first; other command lines fall through to the
-# user's own strategies.
+# suggested, most frecent first, and only where Tab would offer the same
+# project; other lines fall through to the user's own strategies.
 function _zsh_autosuggest_strategy_codehop {
   emulate -L zsh
   typeset -g suggestion=
-  [[ $1 == *' '* ]] || return
-  local cmd=${1%% *} word=${1#* }
-  [[ -n $word && $word != *' '* ]] || return
-  case $cmd in
-    ({{join .AllNames "|"}}) ;;
-    (*) return ;;
-  esac
+  [[ $1 == *' '* ]] || return 0
+  local cmd=${1%% *} word=${1##* } q
+  [[ -n $word ]] || return 0
+  if (( ${__codehop_names[(Ie)$cmd]} )) && [[ $1 != *' '*' '* ]]; then
+    q=$word
+{{- if .Expand.Enabled}}
+{{- if .Expand.Prefix}}
+  elif [[ $word == "{{.Expand.Prefix}}"?* && $word != */* ]]; then
+    q=${word#?}
+{{- end}}
+  elif (( ${__codehop_expand_commands[(Ie)$cmd]} )) && [[ $word != [-.~/+]* && $word != */* ]] &&
+      __codehop_single_command "$1" && ! __codehop_local_match "$word"; then
+    q=$word
+{{- end}}
+  else
+    return 0
+  fi
   local -a matches
-  matches=("${(@f)$(command codehop list --names --query="$word" 2>/dev/null)}")
-  [[ -n ${matches[1]} && ${matches[1]} == "$word"* ]] && suggestion="$cmd ${matches[1]}"
+  matches=("${(@f)$(command codehop list --names --query="$q" 2>/dev/null)}")
+  [[ -n ${matches[1]} && ${matches[1]} == "$q"* ]] && suggestion="$1${matches[1]:${#q}}"
   return 0
 }
 if (( ! ${ZSH_AUTOSUGGEST_STRATEGY[(Ie)codehop]:-0} )); then
   typeset -ga ZSH_AUTOSUGGEST_STRATEGY
   ZSH_AUTOSUGGEST_STRATEGY=(codehop ${ZSH_AUTOSUGGEST_STRATEGY[@]:-history})
 fi
-{{- end}}
 
 if (( $+functions[compdef] )); then
 {{- if .Cmd}}
@@ -109,6 +225,9 @@ if (( $+functions[compdef] )); then
 {{- end}}
 {{- if .CompleteNames}}
   compdef __codehop_complete_first {{join .CompleteNames " "}}
+{{- end}}
+{{- if .Expand.Enabled}}
+  compdef __codehop_complete_any -first-
 {{- end}}
   # Keep codehop's frecency order instead of sorting alphabetically.
   zstyle ':completion:*:*:*:*:projects' sort false

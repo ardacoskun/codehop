@@ -34,3 +34,62 @@ end
 {{- range .CompleteNames}}
 complete -c {{.}} -f -n __codehop_first_arg -a '(command codehop list --describe 2>/dev/null)'
 {{- end}}
+{{- if .Expand.Enabled}}
+
+# --- Project paths in any command --------------------------------------------
+# {{if .Expand.Prefix}}"{{.Expand.Prefix}}blog/src" works in every command, and {{end}}"cd blog" / "ls blog"
+# accept a bare project name when nothing of that name exists here. Enter
+# rewrites the whole line before it runs (or stops it with the reason, e.g. a
+# name that matches several projects).{{if .Expand.Prefix}} "{{.Expand.Prefix}}" words are also expanded
+# as soon as they are finished (fish 3.6+ abbreviation).{{end}} codehop decides;
+# anything unclear stays as typed.
+set -g __codehop_expand_commands {{join .Expand.Commands " "}}
+
+# Prints codehop's verdict on a command line (OK + line, SAME, or BLOCK + why).
+function __codehop_expand_reply --argument-names line
+    printf '%s' $line | command codehop expand-line --shell fish --cwd $PWD --cdpath=(string join : -- $CDPATH) 2>/dev/null | string collect
+end
+
+function __codehop_enter
+    set -l line (commandline | string collect)
+    set -l tokens (commandline -o)
+    set -l wanted 0
+    {{if .Expand.Prefix}}string match -q -- '*{{.Expand.Prefix}}*' $line; and set wanted 1
+    {{end}}if test (count $tokens) -gt 1
+        for t in $tokens
+            contains -- $t $__codehop_expand_commands; and set wanted 1
+        end
+    end
+    if test $wanted -eq 1
+        set -l reply (__codehop_expand_reply $line)
+        set -l parts (string split -m1 \n -- $reply)
+        switch "$parts[1]"
+            case OK
+                test (count $parts) -eq 2; and commandline -r -- $parts[2]
+            case BLOCK
+                echo
+                printf '%s\n' $parts[2] >&2
+                commandline -f repaint
+                return
+        end
+    end
+    commandline -f execute
+end
+# Enter is taken over only where the user has not bound it themselves
+# (fish's own preset binding is "execute").
+for __codehop_mode in default insert
+    set -l __codehop_own (bind -M $__codehop_mode \r 2>/dev/null | string match -v -- '*--preset*')
+    if test -z "$__codehop_own"; or string match -q -- '*__codehop_enter' $__codehop_own
+        bind -M $__codehop_mode \r __codehop_enter
+        bind -M $__codehop_mode \n __codehop_enter
+    end
+end
+set -e __codehop_mode
+{{- if .Expand.Prefix}}
+
+function __codehop_abbr_expand
+    commandline -c | command codehop expand-word --shell fish --cwd $PWD --cdpath=(string join : -- $CDPATH) 2>/dev/null
+end
+abbr --add __codehop_expand --position anywhere --regex '{{regexEscape .Expand.Prefix}}.+' --function __codehop_abbr_expand 2>/dev/null
+{{- end}}
+{{- end}}

@@ -48,3 +48,163 @@ function {{.Name}} {
 
 complete -o bashdefault -o default -F __codehop_complete {{join .CompleteNames " "}}
 {{- end}}
+{{- if .Expand.Enabled}}
+
+# --- Project paths in any command --------------------------------------------
+# {{if .Expand.Prefix}}"{{.Expand.Prefix}}blog/src" works in every command, and {{end}}"cd blog" / "ls blog"
+# accept a bare project name when nothing of that name exists here. They are
+# expanded when Enter is pressed (bash 4+), so the line you see is what runs
+# and what history keeps. codehop decides; anything unclear is left as typed.
+__codehop_expand_commands=({{join .Expand.Commands " "}})
+__codehop_expand_skip=({{join .Expand.Skip " "}})
+
+# __codehop_in_list <word> <list...>: is the word one of the names?
+__codehop_in_list() {
+  local w=$1 c
+  shift
+  for c in "$@"; do
+    [[ $c == "$w" ]] && return 0
+  done
+  return 1
+}
+
+__codehop_is_expand_command() {
+  __codehop_in_list "$1" ${__codehop_expand_commands[@]+"${__codehop_expand_commands[@]}"}
+}
+
+# True when a tool from the skip list appears in the current command line;
+# its own completion is then left alone ("curl -d @file").
+__codehop_mentions_skipped() {
+  local w
+  for w in "${COMP_WORDS[@]}"; do
+    __codehop_in_list "${w##*/}" ${__codehop_expand_skip[@]+"${__codehop_expand_skip[@]}"} && return 0
+  done
+  return 1
+}
+
+# Tab: {{if .Expand.Prefix}}"{{.Expand.Prefix}}name" and "{{.Expand.Prefix}}name/path" in any command; {{end}}bare names after
+# [expand] commands only when the line is that one command and nothing local
+# matches. Returns 1 when it has nothing to offer.
+# Arguments are those bash passes to completion functions: $2 is the word
+# exactly as readline will replace it.
+__codehop_complete_expand() {
+  local cur=${2-${COMP_WORDS[COMP_CWORD]}} line
+  __codehop_mentions_skipped && return 1
+{{- if .Expand.Prefix}}
+  # bash splits words at characters in COMP_WORDBREAKS (which include @ and
+  # :), so take the whole word from the line and hand bash back only the part
+  # it is completing.
+  local full=${COMP_LINE:0:COMP_POINT}
+  full=${full##*[[:space:]]}
+  if [[ $full == "{{.Expand.Prefix}}"* && ${#full} -ge ${#cur} ]]; then
+    local keep=${full:0:${#full}-${#cur}} c
+    local -a found=()
+    if [[ $full == */* ]]; then
+      local name=${full#?} dir f
+      name=${name%%/*}
+      dir=$(command codehop query --exact -- "$name" 2>/dev/null) || return 1
+      while IFS= read -r f; do
+        [[ -d $f ]] && f+=/
+        found+=("{{.Expand.Prefix}}$name/$(printf '%q' "${f#"$dir"/}")")
+      done < <(compgen -f -- "$dir/${full#*/}")
+    else
+      while IFS= read -r line; do
+        [[ -n $line ]] && found+=("{{.Expand.Prefix}}$(printf '%q' "$line")/")
+      done < <(command codehop list --names --query="${full#?}" 2>/dev/null)
+    fi
+    (( ${#found[@]} )) || return 1
+    for c in "${found[@]}"; do
+      COMPREPLY+=("${c#"$keep"}")
+    done
+    compopt -o nospace 2>/dev/null
+    return 0
+  fi
+{{- end}}
+  if (( COMP_CWORD >= 1 )) && __codehop_is_expand_command "${COMP_WORDS[0]}" &&
+      [[ $COMP_LINE != *[\;\|\&]* && -n $cur && $cur != [-.~/+]* && $cur != */* ]] &&
+      [[ -z $(compgen -f -- "$cur") ]]; then
+    while IFS= read -r line; do
+      [[ -n $line ]] && COMPREPLY+=("$(printf '%q' "$line")/")
+    done < <(command codehop list --names --query="$cur" 2>/dev/null)
+    (( ${#COMPREPLY[@]} )) && compopt -o nospace 2>/dev/null
+    (( ${#COMPREPLY[@]} ))
+    return
+  fi
+  return 1
+}
+
+if (( BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 1) )); then
+  # Commands without their own completion: keep whatever default completion
+  # was set (e.g. bash-completion's loader) and run it when codehop has
+  # nothing to add.
+  # Remember the earlier default only once: after a reload it is codehop's.
+  __codehop_default=$(complete -p -D 2>/dev/null | sed -n 's/.* -F \([^ ]*\) .*/\1/p') || true
+  if [[ $__codehop_default != __codehop_* ]]; then
+    __codehop_prev_default=$__codehop_default
+  fi
+  unset __codehop_default
+  __codehop_complete_default() {
+    COMPREPLY=()
+    __codehop_complete_expand "$@" && return 0
+    if [[ -n ${__codehop_prev_default-} ]]; then
+      "$__codehop_prev_default" "$@"
+      return
+    fi
+    return 1
+  }
+  complete -D -o bashdefault -o default -F __codehop_complete_default
+
+  # [expand] commands that already have a completion function (cd, pushd):
+  # codehop runs first and hands over when it has nothing to add.
+  for __codehop_cmd in ${__codehop_expand_commands[@]+"${__codehop_expand_commands[@]}"}; do
+    __codehop_spec=$(complete -p "$__codehop_cmd" 2>/dev/null) || continue
+    __codehop_fn=$(sed -n 's/.* -F \([^ ]*\) .*/\1/p' <<<"$__codehop_spec")
+    [[ -n $__codehop_fn && $__codehop_fn != __codehop_* ]] || continue
+    eval "__codehop_wrapped_${__codehop_fn}() { COMPREPLY=(); __codehop_complete_expand \"\$@\" && return 0; ${__codehop_fn} \"\$@\"; }"
+    eval "${__codehop_spec/-F "$__codehop_fn"/-F __codehop_wrapped_${__codehop_fn}}"
+  done
+  unset __codehop_cmd __codehop_spec __codehop_fn
+fi
+
+# Enter: rewrite the line, then accept it. bash cannot cancel Enter from a
+# key binding, so Enter is a macro of two steps and the second one is
+# switched off for a line that must not run.
+if (( BASH_VERSINFO[0] >= 4 )) && [[ $- == *i* ]]; then
+  __codehop_expand_readline() {
+    bind '"\C-x\C-j": accept-line'
+    local line=$READLINE_LINE reply w found=1
+    local -a words
+    [[ -n $line ]] || return 0
+    # Quick filter before running codehop: a prefix anywhere, or a listed
+    # command with an argument (codehop applies the real rules).
+    read -ra words <<<"$line"
+    if (( ${#words[@]} > 1 )); then
+      for w in "${words[@]}"; do
+        __codehop_is_expand_command "$w" && { found=0; break; }
+      done
+    fi
+    {{if .Expand.Prefix}}[[ $line == *"{{.Expand.Prefix}}"* ]] && found=0
+    {{end}}(( found == 0 )) || return 0
+    reply=$(printf '%s' "$line" | command codehop expand-line --shell bash --cwd "$PWD" --cdpath "${CDPATH-}" 2>/dev/null) || return 0
+    case ${reply%%$'\n'*} in
+      OK)
+        if [[ $reply == *$'\n'* ]]; then
+          READLINE_LINE=${reply#*$'\n'}
+          READLINE_POINT=${#READLINE_LINE}
+        fi
+        ;;
+      BLOCK)
+        printf '%s\n' "${reply#*$'\n'}" >&2
+        bind '"\C-x\C-j": redraw-current-line'
+        ;;
+    esac
+  }
+  for __codehop_keymap in emacs vi-insert; do
+    bind -m "$__codehop_keymap" -x '"\C-x\C-h": __codehop_expand_readline'
+    bind -m "$__codehop_keymap" '"\C-x\C-j": accept-line'
+    bind -m "$__codehop_keymap" '"\C-m": "\C-x\C-h\C-x\C-j"'
+    bind -m "$__codehop_keymap" '"\C-j": "\C-x\C-h\C-x\C-j"'
+  done
+  unset __codehop_keymap
+fi
+{{- end}}

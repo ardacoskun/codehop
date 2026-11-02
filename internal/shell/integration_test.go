@@ -53,6 +53,7 @@ func newEnv(t *testing.T) env {
 	dirs := []string{
 		"games/color-shuffle/.git", "web/blog/.git", "web/murid-admin/.git", "web/murid-landing/.git",
 		"misc/My App/.git", "misc/a;b/.git",
+		"web/api/.git", "mobile/api/.git", // same name: "@api" is ambiguous
 	}
 	if runtime.GOOS != "windows" {
 		// Terminal escape in a folder name: must never be listed or printed.
@@ -178,11 +179,14 @@ func TestZsh(t *testing.T) {
 	// err_exit: the integration must load cleanly in strict shells too.
 	out := e.run(t, zsh, "-f", "-c", `setopt err_exit
 autoload -Uz compinit && compinit -u -d "$HOME/.zcompdump"
+setopt nounset
 `+posixPrelude+`eval "$(codehop init zsh --cmd code)"`+posixScript+`
 _zsh_autosuggest_strategy_codehop "code colo"; echo "SUGGEST:$suggestion"
-_zsh_autosuggest_strategy_codehop "ls colo"; echo "OTHER:[$suggestion]"`)
+_zsh_autosuggest_strategy_codehop "mkdir colo"; echo "OTHER:[$suggestion]"
+_zsh_autosuggest_strategy_codehop "ls colo"; echo "LISTED:$suggestion"`)
 	checkPosixResults(t, e, out)
-	if !strings.Contains(out, "SUGGEST:code color-shuffle") || !strings.Contains(out, "OTHER:[]") {
+	if !strings.Contains(out, "SUGGEST:code color-shuffle") || !strings.Contains(out, "OTHER:[]") ||
+		!strings.Contains(out, "LISTED:ls color-shuffle") {
 		t.Errorf("zsh-autosuggestions strategy wrong:\n%s", out)
 	}
 }
@@ -193,7 +197,7 @@ func TestBash(t *testing.T) {
 	}
 	bash := requireShell(t, "bash")
 	e := newEnv(t)
-	out := e.run(t, bash, "--norc", "--noprofile", "-c", `set -e
+	out := e.run(t, bash, "--norc", "--noprofile", "-c", `set -euo pipefail
 shopt -s expand_aliases
 `+posixPrelude+`eval "$(codehop init bash --cmd code)"`+posixScript+`
 __codehop_set_words() { COMP_WORDS=("$@"); COMP_CWORD=$(( $# - 1 )); }
@@ -281,5 +285,180 @@ function complete($line) {
 	}
 	if !strings.Contains(out, "EMPTY:") || strings.Contains(out, "EMPTY:\n") {
 		t.Errorf("PowerShell completion of an empty word returned nothing:\n%s", out)
+	}
+}
+
+// expandChecks are the expansions every shell must agree on.
+func expandChecks(t *testing.T, e env, out string) {
+	t.Helper()
+	shuffle := filepath.Join(e.root, "games", "color-shuffle")
+	for _, want := range []string{
+		"EXP1:mkdir " + shuffle + "/x",         // @project/path in any command
+		"EXP2:cd " + shuffle,                   // bare name after cd
+		"EXP3:npm i @color-shuffle",            // npm is never touched
+		"EXP4:mkdir blog2 && cd color-shuffle", // bare names only in the first command
+		"EXP5:echo '@color-shuffle'",           // quoted text is never touched
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in\n%s", want, out)
+		}
+	}
+	if !strings.Contains(out, "BLOCKED:yes") || !strings.Contains(out, "mobile/api") {
+		t.Errorf("ambiguous @api did not block the line:\n%s", out)
+	}
+}
+
+const expandLines = `mkdir @color-shuffle/x
+cd color-shuffle
+npm i @color-shuffle
+mkdir blog2 && cd color-shuffle
+echo '@color-shuffle'`
+
+func TestExpandZsh(t *testing.T) {
+	zsh := requireShell(t, "zsh")
+	e := newEnv(t)
+	e.vars = append(e.vars, "EXPAND_LINES="+expandLines)
+	out := e.run(t, zsh, "-f", "-c", `setopt err_exit
+autoload -Uz compinit && compinit -u -d "$HOME/.zcompdump"
+setopt nounset
+eval "$(codehop init zsh --cmd code)"
+eval "$(codehop init zsh --cmd code)"   # a second load (source ~/.zshrc) must not chain to itself
+print -r -- "PREV:[${__codehop_prev_first-}]"
+# zle is only active at an interactive prompt; record what would be shown.
+zle() { print -r -- "ZLE:$*"; }
+CONTEXT=start PREBUFFER=   # what zle sets for a fresh command at the prompt
+n=0
+for line in "${(@f)$(print -r -- "$EXPAND_LINES")}"; do
+  n=$((n + 1)); BUFFER=$line
+  __codehop_expand_buffer
+  print -r -- "EXP$n:$BUFFER"
+done
+BUFFER='ls @api/src'
+if __codehop_expand_buffer; then print BLOCKED:no; else print -r -- "BLOCKED:yes"; fi
+CONTEXT=cont BUFFER='cd color-shuffle'   # a continuation line, e.g. a heredoc body
+__codehop_expand_buffer; print -r -- "CONT:$BUFFER"`)
+	expandChecks(t, e, out)
+	if !strings.Contains(out, "CONT:cd color-shuffle") {
+		t.Errorf("continuation line was rewritten:\n%s", out)
+	}
+	if strings.Contains(out, "PREV:[__codehop") {
+		t.Errorf("second load made the -first- completer call itself:\n%s", out)
+	}
+}
+
+func TestExpandBash(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("bash on Windows is covered by the Git Bash CI job")
+	}
+	bash := requireShell(t, "bash")
+	e := newEnv(t)
+	e.vars = append(e.vars, "EXPAND_LINES="+expandLines)
+	// -i: the Enter integration is only installed in interactive shells.
+	out := e.run(t, bash, "--norc", "--noprofile", "-i", "-c", `
+if (( BASH_VERSINFO[0] < 4 )); then echo SKIP-OLD-BASH; exit 0; fi
+eval "$(codehop init bash --cmd code)" 2>/dev/null
+eval "$(codehop init bash --cmd code)" 2>/dev/null   # a second load must not chain to itself
+echo "PREVDEFAULT:[${__codehop_prev_default-}]"
+n=0
+while IFS= read -r line; do
+  n=$((n + 1)); READLINE_LINE=$line
+  __codehop_expand_readline 2>/dev/null
+  printf '%s\n' "EXP$n:$READLINE_LINE"
+done <<< "$EXPAND_LINES"
+READLINE_LINE='ls @api/src'
+__codehop_expand_readline 2>&1 | grep -q mobile/api && echo "BLOCKED:yes mobile/api"
+COMP_LINE='ls @col' COMP_POINT=7 COMP_WORDS=(ls @col) COMP_CWORD=1 COMPREPLY=()
+__codehop_complete_expand ls @col ls
+echo "CEXP:${COMPREPLY[*]}"
+COMP_LINE='mytool @col' COMP_POINT=11 COMP_WORDS=(mytool @col) COMP_CWORD=1 COMPREPLY=()
+__codehop_complete_default mytool @col mytool
+echo "CDEFAULT:${COMPREPLY[*]}"
+COMP_LINE='curl -d @col' COMP_POINT=12 COMP_WORDS=(curl -d @col) COMP_CWORD=2 COMPREPLY=()
+if __codehop_complete_expand curl @col -d; then echo "CSKIP:taken"; else echo "CSKIP:left"; fi`)
+	if strings.Contains(out, "SKIP-OLD-BASH") {
+		t.Skip("bash < 4 has no READLINE_LINE")
+	}
+	expandChecks(t, e, out)
+	for _, want := range []string{"CEXP:@color-shuffle/", "CDEFAULT:@color-shuffle/", "CSKIP:left", "PREVDEFAULT:[]"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("bash completion: missing %q in\n%s", want, out)
+		}
+	}
+}
+
+func TestExpandFish(t *testing.T) {
+	fish := requireShell(t, "fish")
+	e := newEnv(t)
+	e.vars = append(e.vars, "EXPAND_LINES="+expandLines)
+	// Abbreviations only run at an interactive prompt, so check that the
+	// integration registers one and that the word rewrite it calls works.
+	out := e.run(t, fish, "--no-config", "-c", `codehop init fish --cmd code | source
+abbr --list | string match -q __codehop_expand; and echo ABBR:yes
+printf 'mkdir @color-shuffle/x' | codehop expand-word --shell fish; echo
+printf 'mkdir blog2; and cd color-shuffle' | codehop expand-word --shell fish; or echo SECOND:untouched
+printf 'npm i @color-shuffle' | codehop expand-word --shell fish; or echo NPM:untouched
+set -l n 0
+for line in (string split \n -- $EXPAND_LINES)
+    set n (math $n + 1)
+    set -l parts (string split -m1 \n -- (__codehop_expand_reply $line))
+    if test "$parts[1]" = OK; echo "EXP$n:$parts[2]"; else; echo "EXP$n:$line"; end
+end
+set -l parts (string split -m1 \n -- (__codehop_expand_reply 'ls @api/src'))
+test "$parts[1]" = BLOCK; and echo "BLOCKED:yes $parts[2]"`)
+	shuffle := filepath.Join(e.root, "games", "color-shuffle")
+	for _, want := range []string{"ABBR:yes", shuffle + "/x", "SECOND:untouched", "NPM:untouched"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in\n%s", want, out)
+		}
+	}
+	// The Enter binding's whole-line rewrite.
+	expandChecks(t, e, out)
+}
+
+func TestExpandPowerShell(t *testing.T) {
+	editions := []string{"pwsh"}
+	if runtime.GOOS == "windows" {
+		editions = append(editions, "powershell")
+	}
+	for _, edition := range editions {
+		t.Run(edition, func(t *testing.T) {
+			ps := requireShell(t, edition)
+			e := newEnv(t)
+			e.vars = append(e.vars, "EXPAND_LINES="+expandLines)
+			out := e.run(t, ps, "-NoProfile", "-NonInteractive", "-Command", `
+$ErrorActionPreference = 'Stop'
+Invoke-Expression (& { (codehop init powershell --cmd code | Out-String) })
+$n = 0
+foreach ($line in ($env:EXPAND_LINES -split "`+"`"+`n")) {
+    $n++
+    $r = __codehop_expand_line $line
+    $text = if ($r -and $r[0] -eq 'OK') { $r[1] } else { $line }
+    "EXP${n}:$text"
+}
+$r = __codehop_expand_line 'ls @api/src'
+if ($r -and $r[0] -eq 'BLOCK') { "BLOCKED:yes " + $r[1] }
+function complete($line) {
+    $c = TabExpansion2 -inputScript $line -cursorColumn $line.Length
+    ($c.CompletionMatches | ForEach-Object CompletionText) -join ' '
+}
+"CEXP:" + (complete 'ls @col')
+"CBARE:" + (complete 'cd color')
+"CNONE:" + (complete 'Get-ChildItem -Pa')
+"CSKIP:" + (complete 'curl -d @col')
+Invoke-Expression (& { (codehop init powershell --cmd code | Out-String) })
+"CRELOAD:" + (complete 'ls @col')`)
+			// PowerShell writes Windows paths with backslashes and never uses ~.
+			shuffle := filepath.Join(e.root, "games", "color-shuffle")
+			out = strings.ReplaceAll(out, shuffle+`\x`, shuffle+"/x")
+			expandChecks(t, e, out)
+			if strings.Contains(out, "CSKIP:@color-shuffle") {
+				t.Errorf("PowerShell took over completion for a skipped tool:\n%s", out)
+			}
+			for _, want := range []string{"CEXP:@color-shuffle/", "CBARE:color-shuffle/", "CNONE:-Path", "CRELOAD:@color-shuffle/"} {
+				if !strings.Contains(out, want) {
+					t.Errorf("PowerShell completion: missing %q in\n%s", want, out)
+				}
+			}
+		})
 	}
 }

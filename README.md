@@ -26,6 +26,7 @@ milliseconds.
 - **Frecency.** The projects you open most and most recently come first.
 - **Picker.** Plain `code` opens an [fzf](https://github.com/junegunn/fzf) picker with git status and the README in the preview.
 - **Your editor keeps working.** `code .`, `code file.ts` and `code -n` behave exactly as before.
+- **Projects in every command.** `mkdir @blog/assets`, `cp logo.png @blog/public/` and `cd blog` work anywhere: project names become paths when you press Enter.
 - **More than opening.** Run `cdp <project>` to jump there, add your own actions (`cc <project>` → `claude`), check `git` state across every project at once, and clone with `code gh:owner/repo`.
 
 ## Getting started
@@ -38,6 +39,8 @@ exec zsh
 code <Tab>             # list your projects
 code color-shuffle     # open one
 code                   # pick interactively
+cd color-shuffle       # jump there from anywhere
+ls @color-shuffle/src  # use a project path in any command
 ```
 
 Run `codehop doctor` if nothing shows up. It prints where codehop is looking and which editor it found.
@@ -132,6 +135,58 @@ it offers fuzzy matches and replaces the word: `code shuf<Tab>` becomes
 [fzf-tab](https://github.com/Aloxaf/fzf-tab) and shows each project's category
 next to its name.
 
+### Project paths in any command
+
+Write `@` in front of a project name and it becomes that project's path in
+any command. Commands such as `cd` and `ls` also take a plain project name:
+
+```sh
+mkdir @color-shuffle/assets/new   # → mkdir ~/projects/games/color-shuffle/assets/new
+cp logo.png @blog/public/         # → cp logo.png ~/projects/web/blog/public/
+git -C @design-system status
+cd color-shuffle                  # → cd ~/projects/games/color-shuffle
+ls blog                           # → ls ~/projects/web/blog
+```
+
+The rewrite happens when you press Enter, so the line on screen and in your
+history is the real command. Tab completes `@col` to `@color-shuffle/` and
+then the files inside, and a grey suggestion shows the name as you type
+(zsh with zsh-autosuggestions).
+
+codehop leaves a line alone rather than guess:
+
+- **Exact names only on Enter.** `@colo` is completed with Tab, but it is not
+  expanded on Enter.
+- **Local files win.** `cd blog` goes to `./blog` if it exists, even if its
+  name is spelled `Blog` or `blog_` differently from the project, and if
+  `$CDPATH` finds it.
+- **Plain names only work when the line is that single command.** In a
+  chain such as `cd docs && rm -rf *`, a missing `./docs` must still stop the
+  line, so codehop leaves it alone. Use `@docs` when you mean the project.
+- **Some commands are never touched.** By default these are npm, pnpm, yarn,
+  bun, deno, expo, nx and the other JavaScript tools, node, curl and HTTPie.
+  In those tools `@` means something else, as in `npm i @types/node` and
+  `curl -d @file.json`. The rule holds anywhere on the line, so
+  `xargs npm i @types/node` is safe too.
+- **Option values stay values.** `open -a Notes`, `ls -I build` and
+  `Get-ChildItem -Filter blog` are left alone.
+- **Some text is never touched.** This covers quoted text, `$(...)`, subshells,
+  heredocs, continuation lines and variables. A project whose path contains
+  quotes, `$` or backticks is never written into a command. In PowerShell it also covers `@name` when `$name` is
+  a variable, since that is a splat.
+- **Ambiguous names stop the line.** If a name matches two projects (`web/api`
+  and `mobile/api`), the line is not run and both are shown.
+
+| Shell | Tab | Expanded |
+|---|---|---|
+| zsh | ✓ | on Enter |
+| bash 4+, Git Bash | ✓ | on Enter |
+| fish 3.6+ | — | when the word is finished (space or Enter) |
+| PowerShell (PSReadLine) | ✓ | on Enter |
+
+Change the marker, the command list or the skip list under `[expand]` in the
+config. Set `enabled = false` to turn the feature off.
+
 ### Actions
 
 Actions are your own commands that jump into a project and run something:
@@ -184,6 +239,11 @@ fzf_opts = "--height=60%"
 
 [actions]
 cc = "claude"
+
+[expand]
+prefix = "@"                   # @ , + or : — "" turns @-paths off
+commands = ["cd", "ls", "open", "tree"]          # take a plain project name
+skip = ["npm", "pnpm", "yarn", "bun", "curl"]    # never rewritten
 ```
 
 Hidden folders are skipped. To make any folder a project, drop an empty `.codehop` file into it.
@@ -283,6 +343,9 @@ codehop is built to be safe to run on folders you did not create:
 - **An unreachable network drive cannot freeze your shell.** Tab waits at most
   0.4 s and `code`/`cdp` at most 3 s, then fall back to the last known project
   list. `codehop doctor` shows which root is not responding.
+- **Command lines are only rewritten when the meaning is clear.** A command
+  line is changed only for exact project names, never inside quotes or
+  substitutions, never for skipped commands, and always visibly before it runs.
 - **Clones stay inside your clone root.** If a folder with that name already
   exists, it is only opened when it is a clone of the same repository.
 - **On Windows**, editors that are `.cmd`/`.bat` scripts (VS Code's `code` is

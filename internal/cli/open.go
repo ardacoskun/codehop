@@ -37,12 +37,15 @@ Remote references (gh:owner/repo, git URLs) are cloned first if missing.`,
 }
 
 func newQueryCmd(a *app) *cobra.Command {
-	var record bool
+	var record, exact bool
 	cmd := &cobra.Command{
 		Use:   "query [project]",
 		Short: "Print the path of a project (picker when ambiguous)",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
+			if exact {
+				return a.queryExact(firstArg(args))
+			}
 			p, _, err := a.resolveProject(firstArg(args))
 			if err != nil {
 				return err
@@ -56,7 +59,23 @@ func newQueryCmd(a *app) *cobra.Command {
 		ValidArgsFunction: a.completeProjects,
 	}
 	cmd.Flags().BoolVar(&record, "record", false, "count this as a visit for frecency ranking")
+	cmd.Flags().BoolVar(&exact, "exact", false, "only an exact name match; never ask (for shell completion)")
 	return cmd
+}
+
+// queryExact prints the path of the one project named exactly name, quickly
+// and without a picker; shell completion uses it inside "@project/".
+func (a *app) queryExact(name string) error {
+	r, err := a.exactResolver(completionBudget)
+	if err != nil {
+		return err
+	}
+	matches := r.Exact(name)
+	if len(matches) != 1 {
+		return exitCodeError{code: 1}
+	}
+	fmt.Fprintln(a.stdout, matches[0].Path)
+	return nil
 }
 
 // newWrapCmd is what the shell's `code` function calls. It keeps the
