@@ -383,7 +383,8 @@ func inCDPath(cmd, name string, opts Options, exists func(string) bool) bool {
 		if dir == "" {
 			continue
 		}
-		if !filepath.IsAbs(dir) {
+		// Rooted entries ("/x", or "\x" on Windows) are not relative to cwd.
+		if !filepath.IsAbs(dir) && !strings.HasPrefix(dir, "/") && !strings.HasPrefix(dir, `\`) {
 			dir = join(opts.Cwd, dir)
 		}
 		if exists(filepath.Join(dir, name)) {

@@ -218,7 +218,12 @@ func literal(s string, d Dialect) bool {
 	if s == "" {
 		return false
 	}
-	for _, r := range s {
+	for i, r := range s {
+		// ~ inside a PowerShell word is literal (Windows short names such as
+		// RUNNER~1); elsewhere it can be tilde or glob syntax.
+		if r == '~' && d == PowerShell && i > 0 {
+			continue
+		}
 		// ^ is a glob operator in zsh with EXTENDED_GLOB and , builds an array
 		// in PowerShell, so output quotes them.
 		if !plainRune(r, d) || (r == '^' && d != PowerShell) || (r == ',' && d == PowerShell) {

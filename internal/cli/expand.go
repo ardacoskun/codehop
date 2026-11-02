@@ -36,6 +36,20 @@ const (
 
 var errLineTooLong = errors.New("command line too long to rewrite")
 
+// read returns the command line from the environment variable named by
+// --line-env (PowerShell: Windows PowerShell 5.1 re-encodes piped text), or
+// from stdin.
+func (f *expandFlags) read(stdin io.Reader) (string, error) {
+	if f.lineEnv == "" {
+		return readLine(stdin)
+	}
+	line := os.Getenv(f.lineEnv)
+	if len(line) > maxLineBytes {
+		return "", errLineTooLong
+	}
+	return line, nil
+}
+
 // readLine reads the command line from stdin.
 func readLine(r io.Reader) (string, error) {
 	data, err := io.ReadAll(io.LimitReader(r, maxLineBytes+1))
@@ -49,10 +63,11 @@ func readLine(r io.Reader) (string, error) {
 }
 
 type expandFlags struct {
-	shell  string
-	cwd    string
-	cdpath string
-	keep   []string
+	shell   string
+	cwd     string
+	cdpath  string
+	lineEnv string
+	keep    []string
 }
 
 func (f *expandFlags) register(cmd *cobra.Command) {
@@ -60,6 +75,7 @@ func (f *expandFlags) register(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&f.cwd, "cwd", "", "directory relative paths are checked against (default: current)")
 	cmd.Flags().StringSliceVar(&f.keep, "keep", nil, "names whose prefixed form stays as typed (PowerShell variables)")
 	cmd.Flags().StringVar(&f.cdpath, "cdpath", "", "the shell's cd search path, list-separated (default: $CDPATH)")
+	cmd.Flags().StringVar(&f.lineEnv, "line-env", "", "read the command line from this environment variable instead of stdin")
 	_ = cmd.MarkFlagRequired("shell")
 }
 
@@ -74,11 +90,11 @@ func newExpandLineCmd(a *app) *cobra.Command {
 		Hidden: true,
 		Args:   cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			line, err := readLine(cmd.InOrStdin())
+			line, err := f.read(cmd.InOrStdin())
 			if err != nil {
 				return err
 			}
-			if f.shell == "powershell" || f.shell == "pwsh" {
+			if f.lineEnv == "" && (f.shell == "powershell" || f.shell == "pwsh") {
 				// PowerShell ends text piped to a program with a newline
 				// (CRLF on Windows); it is not part of the command line.
 				line = strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")

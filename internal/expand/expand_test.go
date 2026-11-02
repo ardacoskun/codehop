@@ -2,6 +2,7 @@ package expand
 
 import (
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -46,7 +47,10 @@ func posix() Options {
 		Skip:     []string{"npm", "pnpm", "yarn", "curl"},
 		Cwd:      "/work",
 		Home:     "/home/me",
-		Exists:   func(p string) bool { return p == "/work/blog" || p == "/work/@local" },
+		Exists: func(p string) bool {
+			p = filepath.ToSlash(p)
+			return p == "/work/blog" || p == "/work/@local"
+		},
 	}
 }
 
@@ -257,6 +261,7 @@ func TestLineReviewFindings(t *testing.T) {
 	opts.CDPath = []string{"/cdpath", "sub"}
 	opts.Skip = append(opts.Skip, "node", "http", "tsx")
 	opts.Exists = func(p string) bool {
+		p = filepath.ToSlash(p)
 		return p == "/work/blog" || p == "/cdpath/lib" || p == "/work/sub/rel"
 	}
 	tests := []struct{ name, in, want string }{

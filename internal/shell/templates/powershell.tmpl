@@ -120,9 +120,16 @@ function global:__codehop_expand_line([string] $line) {
     $first = ($line.TrimStart() -split '[\s;|]', 2)[0]
     $hasPrefix = $global:__codehop_expand_prefix -and $line.Contains($global:__codehop_expand_prefix)
     if (-not $hasPrefix -and $global:__codehop_expand_commands -notcontains $first) { return $null }
-    $cmdArgs = @('expand-line', '--shell', 'powershell', '--cwd', (__codehop_cwd))
+    $cmdArgs = @('expand-line', '--shell', 'powershell', '--cwd', (__codehop_cwd), '--line-env', '__CODEHOP_LINE')
     foreach ($name in (__codehop_splat_names $line)) { $cmdArgs += "--keep=$name" }
-    $reply = $line | __codehop_run @cmdArgs
+    # The line travels in an environment variable: piping it would let
+    # Windows PowerShell 5.1 re-encode it.
+    $env:__CODEHOP_LINE = $line
+    try {
+        $reply = __codehop_run @cmdArgs
+    } finally {
+        Remove-Item Env:\__CODEHOP_LINE -ErrorAction SilentlyContinue
+    }
     if ($LASTEXITCODE -ne 0 -or -not $reply) { return $null }
     return , ((@($reply) -join "`n") -split "`n", 2)
 }
