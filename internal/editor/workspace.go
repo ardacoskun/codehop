@@ -51,13 +51,22 @@ func checkWorkspace(file, dir string) error {
 			return fmt.Errorf("%s opens a folder by URI", filepath.Base(file))
 		}
 		p := filepath.FromSlash(folder.Path)
+		// On Windows "/x" is relative to the current drive's root and "C:x" to
+		// that drive's current directory: neither can be resolved here, and
+		// neither means "inside the project".
+		if !filepath.IsAbs(p) && (strings.HasPrefix(p, `\`) || strings.HasPrefix(p, "/") || filepath.VolumeName(p) != "") {
+			return fmt.Errorf("%s opens %q, outside the project", filepath.Base(file), folder.Path)
+		}
 		if !filepath.IsAbs(p) {
 			p = filepath.Join(filepath.Dir(file), p)
 		}
+		// Existing folders are compared with symlinks resolved; folders that
+		// do not exist yet are compared with the project path as given.
+		inside := within(dir, filepath.Clean(p))
 		if resolved, err := filepath.EvalSymlinks(p); err == nil {
-			p = resolved
+			inside = within(root, resolved)
 		}
-		if !within(root, filepath.Clean(p)) {
+		if !inside {
 			return fmt.Errorf("%s opens %q, outside the project", filepath.Base(file), folder.Path)
 		}
 	}

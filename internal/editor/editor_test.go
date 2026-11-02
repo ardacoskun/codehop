@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 )
 
@@ -133,6 +134,10 @@ func TestCheckWorkspace(t *testing.T) {
 		{"parent", `{"folders": [{"path": ".."}]}`, false},
 		{"escape via subpath", `{"folders": [{"path": "packages/../../x"}]}`, false},
 		{"absolute outside", `{"folders": [{"path": "/"}]}`, false},
+		{"rooted backslash", `{"folders": [{"path": "\\\\Windows"}]}`, false},
+		// "C:x" is drive-relative on Windows but a plain file name elsewhere.
+		{"drive relative", `{"folders": [{"path": "C:x"}]}`, runtime.GOOS != "windows"},
+		{"not created yet", `{"folders": [{"path": "packages/later"}]}`, true},
 		{"remote uri", `{"folders": [{"uri": "vscode-remote://ssh-remote+evil/home"}]}`, false},
 		{"no folders", `{"settings": {}}`, false},
 		{"broken json", `{"folders": [`, false},
