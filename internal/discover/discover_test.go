@@ -214,10 +214,11 @@ func TestProjectsWithinFallsBackWhenDiskHangs(t *testing.T) {
 	if err := os.Chtimes(filepath.Join(root, "web"), future, future); err != nil {
 		t.Fatal(err)
 	}
-	release := make(chan struct{})
-	t.Cleanup(func() { close(release) })
+	// Never released, like a dead mount: the abandoned scan must not write
+	// into the temp dirs while the test cleans them up.
+	hang := make(chan struct{})
 	cache.scan = func(Options) Result {
-		<-release
+		<-hang
 		return Result{}
 	}
 
