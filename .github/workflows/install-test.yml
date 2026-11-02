@@ -1,0 +1,57 @@
+name: Install scripts
+
+# Installs the latest release exactly as a new user would: no GitHub login,
+# straight from the published scripts.
+on:
+  release:
+    types: [published]
+  push:
+    branches: [main]
+    paths: [scripts/install.sh, scripts/install.ps1, .github/workflows/install-test.yml]
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  unix:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Install with install.sh
+        env:
+          CODEHOP_INSTALL_DIR: ${{ runner.temp }}/codehop-bin
+        run: |
+          sh scripts/install.sh
+          "$CODEHOP_INSTALL_DIR/codehop" --version
+
+  windows:
+    strategy:
+      fail-fast: false
+      matrix:
+        shell: [pwsh, powershell]
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Install with install.ps1 (${{ matrix.shell }})
+        run: |
+          & ./scripts/install.ps1
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\codehop\codehop.exe'
+          & $exe --version
+          if ($LASTEXITCODE -ne 0) { throw 'codehop did not run' }
+          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          if (($userPath -split ';') -notcontains (Split-Path $exe)) { throw 'install dir was not added to the user PATH' }
+          Write-Host 'install.ps1 OK'
